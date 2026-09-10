@@ -358,6 +358,7 @@ let disciplinaActiva = 'velocidad'; // 'velocidad' | 'relevos' (solo para Atleti
 let modoInscripcionSeccion = false; // pantalla especial: inscribir todos los deportes de una sola sección
 let seccionInscripcionActiva = null;
 let tarjetasAbiertas = {}; // controla qué tarjeta de jugadores está expandida en la inscripción por sección
+let renderPendientePorEdicion = false; // evita refrescar la pantalla mientras alguien está escribiendo un nombre
 function alternarTarjetaJugadores(clave){
   tarjetasAbiertas[clave] = !tarjetasAbiertas[clave];
   render();
@@ -416,6 +417,19 @@ function validarCodigoTutor(){
 }
 
 function esVoley(deporteId){ return deporteId==='voley'; }
+function estaEscribiendoUnCampo(){
+  const activo = document.activeElement;
+  const cont = document.getElementById('contenidoTorneo');
+  return !!(activo && cont && (activo.tagName==='INPUT' || activo.tagName==='SELECT') && cont.contains(activo));
+}
+document.addEventListener('focusout', e=>{
+  const cont = document.getElementById('contenidoTorneo');
+  if(renderPendientePorEdicion && cont && cont.contains(e.target)){
+    setTimeout(()=>{
+      if(!estaEscribiendoUnCampo()){ renderPendientePorEdicion = false; render(); }
+    }, 150);
+  }
+});
 function seccionesDeGrado(grado){ return SECCIONES_TODAS.slice(0, NUM_SECCIONES_POR_GRADO[grado]); }
 function deporteInfo(id){ return DEPORTES.find(d=>d.id===id); }
 function generoInfo(id){ return GENEROS.find(g=>g.id===id); }
@@ -486,9 +500,18 @@ function iniciarAlmacenamiento(){
         estado = estadoInicialVacio();
         guardarEstado();
       }
+      // "jugadores" y "atletismo" se guardan aparte (por sección) para que dos tutores no se pisen; si existen, son más recientes que la copia dentro de "json".
+      if(doc.exists && doc.data()){
+        if(doc.data().jugadores) estado.jugadores = Object.assign({}, estado.jugadores, doc.data().jugadores);
+        if(doc.data().atletismo) estado.atletismo = Object.assign({}, estado.atletismo, doc.data().atletismo);
+      }
       sincronizadoEnVivo = true;
       actualizarIndicadorConexion();
-      render();
+      if(estaEscribiendoUnCampo()){
+        renderPendientePorEdicion = true;
+      } else {
+        render();
+      }
     }, err=>{
       console.error('Error de Firestore, usando datos locales:', err);
       cargarLocal();
@@ -507,9 +530,20 @@ function iniciarAlmacenamiento(){
 function guardarEstado(){
   try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(estado)); }catch(e){}
   if(dbFirestore){
+    // merge:true para no pisar los campos "jugadores"/"atletismo" que los tutores guardan por separado (ver guardarCampoJugadores)
     dbFirestore.collection('torneo').doc('estado')
-      .set({ json: JSON.stringify(estado), actualizado: Date.now() })
+      .set({ json: JSON.stringify(estado), actualizado: Date.now() }, { merge: true })
       .catch(err=> console.error('Error guardando en Firestore (se guardó local igual):', err));
+  }
+}
+// Guarda SOLO la sección/clave que cambió (no todo el estado), así dos tutores de secciones distintas
+// nunca se pisan entre sí, aunque guarden al mismo tiempo. coleccion es 'jugadores' o 'atletismo'.
+function guardarCampoJugadores(coleccion, clave){
+  try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(estado)); }catch(e){}
+  if(dbFirestore){
+    dbFirestore.collection('torneo').doc('estado')
+      .set({ [coleccion]: { [clave]: estado[coleccion][clave] || [] }, actualizado: Date.now() }, { merge: true })
+      .catch(err=> console.error('Error guardando inscripción (se guardó local igual):', err));
   }
 }
 function claveTorneo(deporteId, grado, genero){ return deporteId + '-' + grado + '-' + genero; }
@@ -525,7 +559,7 @@ function agregarJugador(deporteId, grado, genero, seccion){
   if(lista.length>=max) return;
   lista.push('');
   estado.jugadores[clave] = lista;
-  guardarEstado(); render();
+  guardarCampoJugadores('jugadores', clave); render();
 }
 function contarDeportesConEstudiante(grado, genero, seccion, nombre, excluirDeporteId){
   const nombreNorm = (nombre||'').trim().toLowerCase();
@@ -554,14 +588,14 @@ function actualizarJugador(deporteId, grado, genero, seccion, idx, valor){
   const lista = estado.jugadores[clave] || [];
   lista[idx] = valorMayus;
   estado.jugadores[clave] = lista;
-  guardarEstado();
+  guardarCampoJugadores('jugadores', clave);
 }
 function quitarJugador(deporteId, grado, genero, seccion, idx){
   const clave = claveJugadores(deporteId,grado,genero,seccion);
   const lista = estado.jugadores[clave] || [];
   lista.splice(idx,1);
   estado.jugadores[clave] = lista;
-  guardarEstado(); render();
+  guardarCampoJugadores('jugadores', clave); render();
 }
 
 function claveAtletismo(grado, genero, disciplina, seccion){ return 'atl-'+grado+'-'+genero+'-'+disciplina+'-'+seccion; }
@@ -575,7 +609,7 @@ function actualizarAtleta(grado, genero, disciplina, seccion, idx, valor){
   const lista = estado.atletismo[clave] ? [...estado.atletismo[clave]] : [];
   lista[idx] = (valor||'').toUpperCase();
   estado.atletismo[clave] = lista;
-  guardarEstado(); render();
+  guardarCampoJugadores('atletismo', clave); render();
 }
 function obtenerGanadorAtletismo(grado, genero, disciplina){
   return estado.atletismoGanadores[claveGanadorAtletismo(grado,genero,disciplina)] || null;
