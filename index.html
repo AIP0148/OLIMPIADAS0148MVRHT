@@ -23,14 +23,21 @@ los mismos datos en vivo, sigue estos pasos UNA sola vez:
 4. Copia esos valores dentro de la constante FIREBASE_CONFIG
    más abajo en este mismo archivo (busca "FIREBASE_CONFIG").
 5. En Firestore Database > pestaña "Reglas", pega estas reglas (lectura
-   libre para que los tutores vean todo, escritura solo para quien
-   inició sesión como admin):
+   libre para todos; el admin con correo/contraseña puede editar todo;
+   los tutores con sesión anónima SOLO pueden tocar los campos de
+   inscripción, nunca resultados ni sorteos):
      rules_version = '2';
      service cloud.firestore {
        match /databases/{database}/documents {
-         match /{document=**} {
+         match /torneo/estado {
            allow read: if true;
-           allow write: if request.auth != null;
+           allow write: if request.auth != null
+                        && request.auth.token.firebase.sign_in_provider != 'anonymous';
+           allow write: if request.auth != null
+                        && request.auth.token.firebase.sign_in_provider == 'anonymous'
+                        && resource != null
+                        && request.resource.data.diff(resource.data).affectedKeys()
+                             .hasOnly(['jugadores','atletismo','inscripcionCerrada','actualizado']);
          }
        }
      }
@@ -38,6 +45,8 @@ los mismos datos en vivo, sigue estos pasos UNA sola vez:
    y activa el proveedor "Correo electrónico/Contraseña". Luego en la
    pestaña "Users" haz clic en "Agregar usuario" y crea un correo y
    contraseña para el admin (por ejemplo tu correo del colegio).
+   Activa TAMBIÉN el proveedor "Anónimo" en esa misma pestaña — sin
+   eso, los tutores no podrán guardar sus inscripciones.
 7. Guarda este archivo HTML y ábrelo tanto en el dispositivo del
    admin como en el/los dispositivos de los tutores (compártelo
    por correo, USB, Google Drive o súbelo a GitHub Pages). Los
@@ -341,6 +350,28 @@ const FIREBASE_CONFIGURADO = FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.apiKey !=
 // Código que deben ingresar los tutores para inscribir a su sección (cámbialo cuando quieras).
 const CODIGO_TUTOR = 'IE0148';
 
+// Lista básica de groserías/insultos a bloquear al inscribir jugadores (se compara sin tildes y en minúsculas).
+const PALABRAS_PROHIBIDAS = [
+  'mierda','puta','puto','putas','putos','pendejo','pendeja','cabron','cabrona','maricon','marica',
+  'huevon','huevona','conchatumadre','conchetumadre','csm','ctm','verga','pinga','carajo','joder',
+  'idiota','imbecil','estupido','estupida','tarado','tarada','gilipollas','cojudo','cojuda','mrd',
+  'chucha','concha','culiao','culiado','weon','weona','malparido','malparida','hijueputa','hdp',
+  'perra','perro asqueroso','zorra','sexo','pene','vagina','violador','nazi'
+];
+function quitarTildes(t){
+  return (t||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+}
+function contieneLenguajeInapropiado(texto){
+  const limpio = quitarTildes(texto).toLowerCase();
+  return PALABRAS_PROHIBIDAS.some(palabra => limpio.includes(quitarTildes(palabra)));
+}
+function pareceNombreValido(texto){
+  const t = (texto||'').trim();
+  if(!t) return true; // vacío se permite (campo aún sin llenar)
+  // Solo letras (con tildes/ñ), espacios, apóstrofes y guiones — nada de números ni símbolos.
+  return /^[A-Za-zÁÉÍÓÚÑÜáéíóúñü'’\- ]+$/.test(t);
+}
+
 let dbFirestore = null;
 let authFirebase = null;
 let sincronizadoEnVivo = false;
@@ -439,7 +470,7 @@ function estadoInicialVacio(){
   DEPORTES_LLAVE().forEach(d=>{ GRADOS.forEach(g=>{ GENEROS.forEach(gen=>{
     torneos[claveTorneo(d.id,g,gen.id)] = torneoVacio(NUM_SECCIONES_POR_GRADO[g], d.id);
   }); }); });
-  return { torneos, jugadores:{}, atletismo:{}, atletismoGanadores:{} };
+  return { torneos, jugadores:{}, atletismo:{}, atletismoGanadores:{}, inscripcionCerrada:{} };
 }
 
 function completarHuecos(data){
@@ -447,6 +478,7 @@ function completarHuecos(data){
   if(!data.jugadores) data.jugadores = {};
   if(!data.atletismo) data.atletismo = {};
   if(!data.atletismoGanadores) data.atletismoGanadores = {};
+  if(!data.inscripcionCerrada) data.inscripcionCerrada = {};
   DEPORTES_LLAVE().forEach(d=>{ GRADOS.forEach(g=>{ GENEROS.forEach(gen=>{
     const clave = claveTorneo(d.id,g,gen.id);
     if(!data.torneos[clave]) data.torneos[clave] = torneoVacio(NUM_SECCIONES_POR_GRADO[g], d.id);
@@ -504,6 +536,7 @@ function iniciarAlmacenamiento(){
       if(doc.exists && doc.data()){
         if(doc.data().jugadores) estado.jugadores = Object.assign({}, estado.jugadores, doc.data().jugadores);
         if(doc.data().atletismo) estado.atletismo = Object.assign({}, estado.atletismo, doc.data().atletismo);
+        if(doc.data().inscripcionCerrada) estado.inscripcionCerrada = Object.assign({}, estado.inscripcionCerrada, doc.data().inscripcionCerrada);
       }
       sincronizadoEnVivo = true;
       actualizarIndicadorConexion();
@@ -546,6 +579,30 @@ function guardarCampoJugadores(coleccion, clave){
       .catch(err=> console.error('Error guardando inscripción (se guardó local igual):', err));
   }
 }
+function claveCierreSeccion(grado, seccion){ return grado+'-'+seccion; }
+function seccionInscripcionCerrada(grado, seccion){
+  return !!(estado.inscripcionCerrada && estado.inscripcionCerrada[claveCierreSeccion(grado,seccion)]);
+}
+function guardarCierreSeccion(grado, seccion, cerrado){
+  const clave = claveCierreSeccion(grado, seccion);
+  if(!estado.inscripcionCerrada) estado.inscripcionCerrada = {};
+  estado.inscripcionCerrada[clave] = cerrado;
+  try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(estado)); }catch(e){}
+  if(dbFirestore){
+    dbFirestore.collection('torneo').doc('estado')
+      .set({ inscripcionCerrada: { [clave]: cerrado } }, { merge: true })
+      .catch(err=> console.error('Error guardando el cierre de la inscripción:', err));
+  }
+}
+function finalizarInscripcionTutor(){
+  if(!confirm('¿Ya terminaste de inscribir a todos los estudiantes de tu sección?\n\nDespués de guardar no podrás seguir editando — si necesitas corregir algo, tendrás que pedirle al colegio que te habilite de nuevo.')) return;
+  guardarCierreSeccion(gradoActivo, seccionInscripcionActiva, true);
+  render();
+}
+function reabrirInscripcionSeccion(){
+  guardarCierreSeccion(gradoActivo, seccionInscripcionActiva, false);
+  render();
+}
 function claveTorneo(deporteId, grado, genero){ return deporteId + '-' + grado + '-' + genero; }
 function claveJugadores(deporteId, grado, genero, seccion){ return deporteId + '-' + grado + '-' + genero + '-' + seccion; }
 
@@ -576,6 +633,11 @@ function contarDeportesConEstudiante(grado, genero, seccion, nombre, excluirDepo
 function actualizarJugador(deporteId, grado, genero, seccion, idx, valor){
   const valorMayus = (valor||'').toUpperCase();
   const nombreNorm = valorMayus.trim();
+  if(nombreNorm && (!pareceNombreValido(nombreNorm) || contieneLenguajeInapropiado(nombreNorm))){
+    alert('Ese texto no parece un nombre válido. Por favor ingresa el nombre y apellido real del estudiante, sin números, símbolos ni palabras inapropiadas.');
+    render();
+    return;
+  }
   if(nombreNorm){
     const yaEnDeportes = contarDeportesConEstudiante(grado, genero, seccion, nombreNorm, deporteId);
     if(yaEnDeportes >= 3){
@@ -605,9 +667,15 @@ function obtenerAtletismo(grado, genero, disciplina, seccion){
   return estado.atletismo[claveAtletismo(grado,genero,disciplina,seccion)] || [];
 }
 function actualizarAtleta(grado, genero, disciplina, seccion, idx, valor){
+  const valorMayus = (valor||'').toUpperCase().trim();
+  if(valorMayus && (!pareceNombreValido(valorMayus) || contieneLenguajeInapropiado(valorMayus))){
+    alert('Ese texto no parece un nombre válido. Por favor ingresa el nombre y apellido real del estudiante, sin números, símbolos ni palabras inapropiadas.');
+    render();
+    return;
+  }
   const clave = claveAtletismo(grado,genero,disciplina,seccion);
   const lista = estado.atletismo[clave] ? [...estado.atletismo[clave]] : [];
-  lista[idx] = (valor||'').toUpperCase();
+  lista[idx] = valorMayus;
   estado.atletismo[clave] = lista;
   guardarCampoJugadores('atletismo', clave); render();
 }
@@ -1216,11 +1284,50 @@ function renderInscripcionSeccion(){
   if(!seccionInscripcionActiva || !secciones.includes(seccionInscripcionActiva)) seccionInscripcionActiva = secciones[0];
   const seccion = seccionInscripcionActiva;
   const nombreGenero = generoInfo(generoActivo).nombre;
+  const cerrada = seccionInscripcionCerrada(gradoActivo, seccion);
 
   const botonesSeccion = modoTutor ? '' : secciones.map(s=>
     `<button class="${s===seccion?'active':''}" onclick="cambiarSeccionInscripcion('${s}')">Sección ${s}</button>`
   ).join('');
 
+  const encabezadoEstado = modoTutor
+    ? (cerrada
+        ? `<div class="jugadores-card" style="border-color:#2e7d32;"><strong>✅ Inscripción guardada.</strong> Ya no se puede editar desde aquí. Si necesitas corregir algo, comunícate con el colegio.</div>`
+        : '')
+    : (cerrada
+        ? `<div class="jugadores-card" style="border-color:#c77700;">
+             <strong>🔒 El tutor ya guardó y cerró esta sección.</strong> Tú sí puedes seguir editando como administrador.
+             <button class="btn-agregar-jugador" style="margin-top:8px;" onclick="reabrirInscripcionSeccion()">🔓 Reabrir para el tutor</button>
+           </div>`
+        : '');
+
+  // Vista de SOLO LECTURA para el tutor una vez que ya guardó — sin inputs, sin botones de editar.
+  if(modoTutor && cerrada){
+    const filasSoloLectura = DEPORTES_LLAVE().map(d=>{
+      const lista = obtenerJugadores(d.id, gradoActivo, generoActivo, seccion).filter(n=>(n||'').trim());
+      return `<div class="jugadores-card">
+        <div class="titulo-seccion"><strong style="color:${d.color}">${d.nombre}</strong><span class="contador">${lista.length}</span></div>
+        <div class="jugadores-lista">${lista.length ? lista.map(n=>`<div class="jugador-fila jugador-lectura">${n}</div>`).join('') : '<div class="jugador-fila jugador-lectura" style="opacity:.6;">Sin inscritos</div>'}</div>
+      </div>`;
+    }).join('');
+    const vel = obtenerAtletismo(gradoActivo, generoActivo, 'velocidad', seccion).filter(n=>(n||'').trim());
+    const rel = obtenerAtletismo(gradoActivo, generoActivo, 'relevos', seccion).filter(n=>(n||'').trim());
+    const tarjetaVelLectura = `<div class="jugadores-card"><div class="titulo-seccion"><strong style="color:var(--atletismo)">Atletismo · Velocidad</strong></div>
+      <div class="jugadores-lista">${vel.length ? vel.map(n=>`<div class="jugador-fila jugador-lectura">${n}</div>`).join('') : '<div class="jugador-fila jugador-lectura" style="opacity:.6;">Sin inscritos</div>'}</div></div>`;
+    const tarjetaRelLectura = `<div class="jugadores-card"><div class="titulo-seccion"><strong style="color:var(--atletismo)">Atletismo · Relevos (4x100)</strong></div>
+      <div class="jugadores-lista">${rel.length ? rel.map(n=>`<div class="jugador-fila jugador-lectura">${n}</div>`).join('') : '<div class="jugador-fila jugador-lectura" style="opacity:.6;">Sin inscritos</div>'}</div></div>`;
+    cont.innerHTML = `
+      <div class="panel">
+        <h2>Inscripción por sección</h2>
+        <div class="sub">${gradoActivo}° ${seccion} · ${nombreGenero} — resumen de lo inscrito.</div>
+        ${encabezadoEstado}
+      </div>
+      <div class="jugadores-grid">${filasSoloLectura}${tarjetaVelLectura}${tarjetaRelLectura}</div>
+    `;
+    return;
+  }
+
+  const soloLectura = modoTutor && cerrada; // ya cubierto arriba, se mantiene por claridad en lo que sigue
   const tarjetasEquipo = DEPORTES_LLAVE().map(d=>{
     const lista = obtenerJugadores(d.id, gradoActivo, generoActivo, seccion);
     const max = MAX_JUGADORES_POR_DEPORTE[d.id];
@@ -1283,13 +1390,21 @@ function renderInscripcionSeccion(){
     <button class="btn-agregar-jugador" onclick="alternarTarjetaJugadores('relevos')">👁️ Ver / editar</button>`}
   </div>`;
 
+  const botonGuardarTutor = modoTutor
+    ? `<div class="jugadores-card" style="text-align:center;">
+         <button class="btn" style="background:#2e7d32; width:100%; padding:14px; font-size:1.05rem;" onclick="finalizarInscripcionTutor()">✅ Guardar y finalizar inscripción</button>
+         <div style="margin-top:8px; opacity:.75; font-size:.85rem;">Revisa bien los nombres antes de guardar — después no podrás editar.</div>
+       </div>`
+    : '';
+
   cont.innerHTML = `
     <div class="panel">
       <h2>Inscripción por sección</h2>
       <div class="sub">Registra de una sola vez a todos los estudiantes de una sección, en cada deporte o disciplina en la que participan — ${gradoActivo}° ${modoTutor?seccion+' · ':''}de secundaria, ${nombreGenero}. Máximo 3 deportes de equipo (Vóley, Futsal, Balonmano) por estudiante.</div>
       <div class="grados" style="margin-bottom:0;">${botonesSeccion}</div>
+      ${encabezadoEstado}
     </div>
-    <div class="jugadores-grid">${tarjetasEquipo}${tarjetaVelocidad}${tarjetaRelevos}</div>
+    <div class="jugadores-grid">${tarjetasEquipo}${tarjetaVelocidad}${tarjetaRelevos}${botonGuardarTutor}</div>
   `;
 }
 
