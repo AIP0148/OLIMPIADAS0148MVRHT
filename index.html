@@ -245,6 +245,31 @@ pedir inicio de sesión.
     header{ padding:18px 16px; }
     header h1{ font-size:1.25rem; }
     .bracket{ gap:14px; }
+  }
+
+  /* ===================== Impresión ===================== */
+  #areaImpresion{ display:none; }
+  .imp-portada{ text-align:center; padding-bottom:14px; margin-bottom:16px; border-bottom:3px solid #222; }
+  .imp-portada h1{ margin:0 0 4px; font-size:1.5rem; }
+  .imp-portada p{ margin:2px 0; }
+  .imp-grado{ margin-bottom:22px; }
+  .imp-grado h2{ background:#222; color:#fff; padding:6px 10px; border-radius:6px; font-size:1.15rem; margin:0 0 10px; }
+  .imp-deporte{ font-size:1rem; margin:14px 0 4px; padding-bottom:3px; border-bottom:2px solid #222; }
+  .imp-deporte:first-of-type{ margin-top:0; }
+  .imp-disciplina{ margin:8px 0 2px; }
+  .imp-tabla{ width:100%; border-collapse:collapse; margin-bottom:10px; font-size:.85rem; }
+  .imp-tabla th, .imp-tabla td{ border:1px solid #999; padding:4px 6px; text-align:left; vertical-align:top; }
+  .imp-tabla th{ background:#eee; }
+  .imp-seccion-col{ width:90px; font-weight:700; white-space:nowrap; }
+  .imp-vacio{ color:#777; font-style:italic; }
+  .imp-llave{ display:flex; flex-wrap:wrap; gap:10px; margin-bottom:14px; }
+  .imp-ronda{ border:1px solid #999; border-radius:6px; padding:6px 10px; font-size:.85rem; min-width:180px; flex:1; }
+  .imp-campeon{ font-weight:700; margin:4px 0 14px; }
+  @media print{
+    body > *:not(#areaImpresion){ display:none !important; }
+    #areaImpresion{ display:block !important; }
+    .salto-pagina{ page-break-before: always; }
+  }
     .ronda{ min-width:190px; }
     table.posiciones, table.tablero{ font-size:.75rem; }
   }
@@ -265,6 +290,7 @@ pedir inicio de sesión.
   <div style="display:flex; gap:8px; flex-wrap:wrap;">
     <button class="modo-toggle" onclick="alternarInscripcionSeccion()" id="botonInscripcionSeccion" style="display:none;">📋 Inscripción por sección</button>
     <button class="modo-toggle" onclick="mostrarCodigosSeccion()" id="botonCodigos" style="display:none;">🔑 Códigos por sección</button>
+    <button class="modo-toggle" onclick="imprimirTodo()" id="botonImprimir">🖨️ Imprimir jugadores y llaves</button>
     <button class="modo-toggle" onclick="alternarModo()" id="botonModo"></button>
   </div>
 </header>
@@ -317,6 +343,8 @@ pedir inicio de sesión.
 <div class="overlay-login oculto" id="overlayInfo">
   <div class="caja-info" id="contenidoInfo"></div>
 </div>
+
+<div id="areaImpresion"></div>
 
 <script>
 const DEPORTES = [
@@ -1549,6 +1577,106 @@ function alternarInscripcionSeccion(){
   render();
 }
 function cambiarSeccionInscripcion(s){ seccionInscripcionActiva = s; render(); }
+
+// ===================== Impresión: jugadores por sección/disciplina + llaves =====================
+function textoMatchImpresion(m){
+  const local = m.local ? `Sección ${m.local}` : 'Por definir';
+  const visitante = m.visitante ? `Sección ${m.visitante}` : 'Por definir';
+  let resultado = '';
+  if(m.sets){
+    const jugados = m.sets.filter(s=>s.l!==null && s.v!==null && s.l!=='' && s.v!=='');
+    if(jugados.length) resultado = ' ('+jugados.map(s=>`${s.l}-${s.v}`).join(', ')+')';
+  } else if(m.gLocal!==null && m.gLocal!==undefined && m.gLocal!=='' && m.gVisitante!==null && m.gVisitante!==undefined && m.gVisitante!==''){
+    resultado = ` (${m.gLocal} - ${m.gVisitante})`;
+  }
+  const ganadorTxt = m.ganador ? ` — Ganó Sección ${m.ganador}` : '';
+  return `${local} vs ${visitante}${resultado}${ganadorTxt}`;
+}
+
+function generarTablaJugadoresImpresion(deporteId, grado, genero){
+  const max = MAX_JUGADORES_POR_DEPORTE[deporteId];
+  const filas = seccionesDeGrado(grado).map(seccion=>{
+    const lista = obtenerJugadores(deporteId, grado, genero, seccion);
+    const nombres = lista.filter(n=>n && n.trim())
+      .map((n,i)=>`${i+1}. ${n}`).join('<br>') || `<span class="imp-vacio">Sin jugadores</span>`;
+    return `<tr><td class="imp-seccion-col">Sección ${seccion}</td><td>${nombres}</td></tr>`;
+  }).join('');
+  return `<table class="imp-tabla"><thead><tr><th>Sección</th><th>Jugadores (máx. ${max})</th></tr></thead><tbody>${filas}</tbody></table>`;
+}
+
+function generarTablaAtletismoImpresion(grado, genero, disciplina){
+  const filas = seccionesDeGrado(grado).map(seccion=>{
+    const lista = obtenerAtletismo(grado, genero, disciplina, seccion);
+    const nombres = lista.filter(n=>n && n.trim())
+      .map((n,i)=>`${i+1}. ${n}`).join('<br>') || `<span class="imp-vacio">Sin jugadores</span>`;
+    return `<tr><td class="imp-seccion-col">Sección ${seccion}</td><td>${nombres}</td></tr>`;
+  }).join('');
+  return `<table class="imp-tabla"><thead><tr><th>Sección</th><th>Participantes</th></tr></thead><tbody>${filas}</tbody></table>`;
+}
+
+function generarLlaveImpresion(deporteId, grado, genero){
+  const t = estado.torneos[claveTorneo(deporteId, grado, genero)];
+  if(!t) return `<p class="imp-vacio">Llave aún no sorteada.</p>`;
+  const sorteoInicialHecho = t.n===5 ? t.sorteo1Hecho : t.sorteoHecho;
+  if(!sorteoInicialHecho) return `<p class="imp-vacio">Llave aún no sorteada.</p>`;
+  let html = `<div class="imp-llave">`;
+  if(t.n===5){
+    html += `<div class="imp-ronda"><strong>Ronda 1</strong><br>${textoMatchImpresion(t.r1a)}<br>${textoMatchImpresion(t.r1b)}<br>Sección ${t.byeSeccion} pasa directo a semifinal</div>`;
+    if(t.sorteo2Hecho){
+      html += `<div class="imp-ronda"><strong>Semifinal</strong><br>${textoMatchImpresion(t.semifinal)}<br>Sección ${t.directoFinal} pasó directo a la final</div>`;
+      html += `<div class="imp-ronda"><strong>Final</strong><br>${textoMatchImpresion(t.final)}</div>`;
+    } else {
+      html += `<div class="imp-ronda"><strong>Semifinal</strong><br>Pendiente de sorteo</div>`;
+    }
+  } else {
+    html += `<div class="imp-ronda"><strong>Semifinales</strong><br>${textoMatchImpresion(t.sf1)}<br>${textoMatchImpresion(t.sf2)}</div>`;
+    html += `<div class="imp-ronda"><strong>Final</strong><br>${textoMatchImpresion(t.final)}</div>`;
+  }
+  html += `</div>`;
+  if(t.final.ganador) html += `<p class="imp-campeon">🏆 Campeón: Sección ${t.final.ganador}</p>`;
+  return html;
+}
+
+function generarAreaImpresion(){
+  let html = `<div class="imp-portada">
+    <h1>🏆 Olimpiadas Escolares 2026</h1>
+    <p>I.E. N° 0148 "Maestro Víctor Raúl Haya de la Torre"</p>
+    <p>Lista de jugadores por sección y disciplina — Llaves de competencia</p>
+    <p style="color:#777; font-size:.8rem;">Generado el ${new Date().toLocaleDateString('es-PE')}</p>
+  </div>`;
+
+  GRADOS.forEach((g,idxG)=>{
+    html += `<div class="imp-grado${idxG>0 ? ' salto-pagina' : ''}"><h2>${g}° de secundaria</h2>`;
+    DEPORTES.forEach(d=>{
+      html += `<h3 class="imp-deporte">${d.nombre}</h3>`;
+      if(d.tipo==='llave'){
+        GENEROS.forEach(gen=>{
+          html += `<h4>${gen.nombre}</h4>`;
+          html += generarTablaJugadoresImpresion(d.id, g, gen.id);
+          html += generarLlaveImpresion(d.id, g, gen.id);
+        });
+      } else {
+        GENEROS.forEach(gen=>{
+          html += `<h4>${gen.nombre}</h4>`;
+          DISCIPLINAS_ATLETISMO.forEach(dis=>{
+            html += `<p class="imp-disciplina"><strong>${dis.nombre}</strong></p>`;
+            html += generarTablaAtletismoImpresion(g, gen.id, dis.id);
+            const ganador = obtenerGanadorAtletismo(g, gen.id, dis.id);
+            if(ganador) html += `<p class="imp-campeon">🏅 Ganador: Sección ${ganador}</p>`;
+          });
+        });
+      }
+    });
+    html += `</div>`;
+  });
+
+  document.getElementById('areaImpresion').innerHTML = html;
+}
+
+function imprimirTodo(){
+  generarAreaImpresion();
+  setTimeout(()=>window.print(), 60);
+}
 
 function render(){
   renderNav();
