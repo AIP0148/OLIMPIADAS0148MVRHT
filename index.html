@@ -290,7 +290,7 @@ pedir inicio de sesión.
   <div style="display:flex; gap:8px; flex-wrap:wrap;">
     <button class="modo-toggle" onclick="alternarInscripcionSeccion()" id="botonInscripcionSeccion" style="display:none;">📋 Inscripción por sección</button>
     <button class="modo-toggle" onclick="mostrarCodigosSeccion()" id="botonCodigos" style="display:none;">🔑 Códigos por sección</button>
-    <button class="modo-toggle" onclick="imprimirTodo()" id="botonImprimir">🖨️ Imprimir jugadores y llaves</button>
+    <button class="modo-toggle" onclick="mostrarModalImprimir()" id="botonImprimir">🖨️ Imprimir</button>
     <button class="modo-toggle" onclick="alternarModo()" id="botonModo"></button>
   </div>
 </header>
@@ -336,6 +336,29 @@ pedir inicio de sesión.
     <div class="error-login" id="errorTutor"></div>
     <div class="fila-botones">
       <button class="btn" style="flex:1;" onclick="validarCodigoTutor()">Ingresar</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay-login oculto" id="overlayImprimir">
+  <div class="caja-login">
+    <h3>🖨️ Imprimir</h3>
+    <p>Elige qué quieres imprimir: jugadores de una sección, una llave completa, o todo.</p>
+    <label style="font-size:.8rem; font-weight:700; display:block; margin:8px 0 2px;">Grado</label>
+    <select id="impGradoSelect" onchange="actualizarSeccionesImprimirSelect()" style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--borde); margin-bottom:8px;"></select>
+    <label style="font-size:.8rem; font-weight:700; display:block; margin:8px 0 2px;">Sección</label>
+    <select id="impSeccionSelect" style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--borde); margin-bottom:8px;"></select>
+    <label style="font-size:.8rem; font-weight:700; display:block; margin:8px 0 2px;">Deporte / disciplina</label>
+    <select id="impDeporteSelect" style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--borde); margin-bottom:8px;"></select>
+    <label style="font-size:.8rem; font-weight:700; display:block; margin:8px 0 2px;">Género</label>
+    <select id="impGeneroSelect" style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--borde); margin-bottom:8px;">
+      <option value="todos">Ambos</option>
+      <option value="F">Femenino</option>
+      <option value="M">Masculino</option>
+    </select>
+    <div class="fila-botones">
+      <button class="btn secundario" onclick="cerrarModalImprimir()">Cancelar</button>
+      <button class="btn" onclick="ejecutarImpresion()">Imprimir</button>
     </div>
   </div>
 </div>
@@ -1593,9 +1616,11 @@ function textoMatchImpresion(m){
   return `${local} vs ${visitante}${resultado}${ganadorTxt}`;
 }
 
-function generarTablaJugadoresImpresion(deporteId, grado, genero){
+// seccionFiltro: null/undefined = todas las secciones del grado; si se pasa una letra, solo esa fila.
+function generarTablaJugadoresImpresion(deporteId, grado, genero, seccionFiltro){
   const max = MAX_JUGADORES_POR_DEPORTE[deporteId];
-  const filas = seccionesDeGrado(grado).map(seccion=>{
+  const secciones = seccionFiltro ? [seccionFiltro] : seccionesDeGrado(grado);
+  const filas = secciones.map(seccion=>{
     const lista = obtenerJugadores(deporteId, grado, genero, seccion);
     const nombres = lista.filter(n=>n && n.trim())
       .map((n,i)=>`${i+1}. ${n}`).join('<br>') || `<span class="imp-vacio">Sin jugadores</span>`;
@@ -1604,8 +1629,9 @@ function generarTablaJugadoresImpresion(deporteId, grado, genero){
   return `<table class="imp-tabla"><thead><tr><th>Sección</th><th>Jugadores (máx. ${max})</th></tr></thead><tbody>${filas}</tbody></table>`;
 }
 
-function generarTablaAtletismoImpresion(grado, genero, disciplina){
-  const filas = seccionesDeGrado(grado).map(seccion=>{
+function generarTablaAtletismoImpresion(grado, genero, disciplina, seccionFiltro){
+  const secciones = seccionFiltro ? [seccionFiltro] : seccionesDeGrado(grado);
+  const filas = secciones.map(seccion=>{
     const lista = obtenerAtletismo(grado, genero, disciplina, seccion);
     const nombres = lista.filter(n=>n && n.trim())
       .map((n,i)=>`${i+1}. ${n}`).join('<br>') || `<span class="imp-vacio">Sin jugadores</span>`;
@@ -1637,30 +1663,43 @@ function generarLlaveImpresion(deporteId, grado, genero){
   return html;
 }
 
-function generarAreaImpresion(){
+// filtro = { grado:'todos'|numero, seccion:'todas'|letra, deporteId:'todos'|id, genero:'todos'|'F'|'M' }
+function generarAreaImpresion(filtro){
+  const grados = filtro.grado==='todos' ? GRADOS : [Number(filtro.grado)];
+  const deportes = filtro.deporteId==='todos' ? DEPORTES : DEPORTES.filter(d=>d.id===filtro.deporteId);
+  const generos = filtro.genero==='todos' ? GENEROS : GENEROS.filter(g=>g.id===filtro.genero);
+  const seccionFiltro = (filtro.seccion && filtro.seccion!=='todas') ? filtro.seccion : null;
+
+  let subtitulo = 'Lista de jugadores';
+  if(deportes.length===1) subtitulo += ` — ${deportes[0].nombre}`;
+  if(seccionFiltro) subtitulo += ` — Sección ${seccionFiltro}`;
+  if(grados.length===1) subtitulo += ` — ${grados[0]}° de secundaria`;
+
   let html = `<div class="imp-portada">
     <h1>🏆 Olimpiadas Escolares 2026</h1>
     <p>I.E. N° 0148 "Maestro Víctor Raúl Haya de la Torre"</p>
-    <p>Lista de jugadores por sección y disciplina — Llaves de competencia</p>
+    <p>${subtitulo}</p>
     <p style="color:#777; font-size:.8rem;">Generado el ${new Date().toLocaleDateString('es-PE')}</p>
   </div>`;
 
-  GRADOS.forEach((g,idxG)=>{
-    html += `<div class="imp-grado${idxG>0 ? ' salto-pagina' : ''}"><h2>${g}° de secundaria</h2>`;
-    DEPORTES.forEach(d=>{
+  grados.forEach((g,idxG)=>{
+    // Si hay una sección específica seleccionada, filtramos las secciones que no existan en ese grado.
+    if(seccionFiltro && !seccionesDeGrado(g).includes(seccionFiltro)) return;
+    html += `<div class="imp-grado${idxG>0 ? ' salto-pagina' : ''}"><h2>${g}° de secundaria${seccionFiltro ? ' — Sección '+seccionFiltro : ''}</h2>`;
+    deportes.forEach(d=>{
       html += `<h3 class="imp-deporte">${d.nombre}</h3>`;
       if(d.tipo==='llave'){
-        GENEROS.forEach(gen=>{
+        generos.forEach(gen=>{
           html += `<h4>${gen.nombre}</h4>`;
-          html += generarTablaJugadoresImpresion(d.id, g, gen.id);
+          html += generarTablaJugadoresImpresion(d.id, g, gen.id, seccionFiltro);
           html += generarLlaveImpresion(d.id, g, gen.id);
         });
       } else {
-        GENEROS.forEach(gen=>{
+        generos.forEach(gen=>{
           html += `<h4>${gen.nombre}</h4>`;
           DISCIPLINAS_ATLETISMO.forEach(dis=>{
             html += `<p class="imp-disciplina"><strong>${dis.nombre}</strong></p>`;
-            html += generarTablaAtletismoImpresion(g, gen.id, dis.id);
+            html += generarTablaAtletismoImpresion(g, gen.id, dis.id, seccionFiltro);
             const ganador = obtenerGanadorAtletismo(g, gen.id, dis.id);
             if(ganador) html += `<p class="imp-campeon">🏅 Ganador: Sección ${ganador}</p>`;
           });
@@ -1673,8 +1712,40 @@ function generarAreaImpresion(){
   document.getElementById('areaImpresion').innerHTML = html;
 }
 
-function imprimirTodo(){
-  generarAreaImpresion();
+function mostrarModalImprimir(){
+  const gradoSelect = document.getElementById('impGradoSelect');
+  gradoSelect.innerHTML = `<option value="todos">Todos los grados</option>` +
+    GRADOS.map(g=>`<option value="${g}">${g}° de secundaria</option>`).join('');
+  gradoSelect.value = String(gradoActivo);
+
+  const deporteSelect = document.getElementById('impDeporteSelect');
+  deporteSelect.innerHTML = `<option value="todos">Todos los deportes</option>` +
+    DEPORTES.map(d=>`<option value="${d.id}">${d.nombre}</option>`).join('');
+  deporteSelect.value = deporteActivo;
+
+  actualizarSeccionesImprimirSelect();
+  document.getElementById('impGeneroSelect').value = 'todos';
+  document.getElementById('overlayImprimir').classList.remove('oculto');
+}
+function cerrarModalImprimir(){
+  document.getElementById('overlayImprimir').classList.add('oculto');
+}
+function actualizarSeccionesImprimirSelect(){
+  const gradoVal = document.getElementById('impGradoSelect').value;
+  const seccionSelect = document.getElementById('impSeccionSelect');
+  const opciones = gradoVal==='todos' ? SECCIONES_TODAS : seccionesDeGrado(Number(gradoVal));
+  seccionSelect.innerHTML = `<option value="todas">Todas las secciones</option>` +
+    opciones.map(s=>`<option value="${s}">Sección ${s}</option>`).join('');
+}
+function ejecutarImpresion(){
+  const filtro = {
+    grado: document.getElementById('impGradoSelect').value,
+    seccion: document.getElementById('impSeccionSelect').value,
+    deporteId: document.getElementById('impDeporteSelect').value,
+    genero: document.getElementById('impGeneroSelect').value
+  };
+  cerrarModalImprimir();
+  generarAreaImpresion(filtro);
   setTimeout(()=>window.print(), 60);
 }
 
