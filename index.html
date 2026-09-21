@@ -351,11 +351,7 @@ pedir inicio de sesión.
     <label style="font-size:.8rem; font-weight:700; display:block; margin:8px 0 2px;">Deporte / disciplina</label>
     <select id="impDeporteSelect" style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--borde); margin-bottom:8px;"></select>
     <label style="font-size:.8rem; font-weight:700; display:block; margin:8px 0 2px;">Género</label>
-    <select id="impGeneroSelect" style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--borde); margin-bottom:8px;">
-      <option value="todos">Ambos</option>
-      <option value="F">Femenino</option>
-      <option value="M">Masculino</option>
-    </select>
+    <select id="impGeneroSelect" style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--borde); margin-bottom:8px;"></select>
     <div class="fila-botones">
       <button class="btn secundario" onclick="cerrarModalImprimir()">Cancelar</button>
       <button class="btn" onclick="ejecutarImpresion()">Imprimir</button>
@@ -1623,6 +1619,7 @@ function generarTablaJugadoresImpresion(deporteId, grado, genero, seccionFiltro)
   const filas = secciones.map(seccion=>{
     const lista = obtenerJugadores(deporteId, grado, genero, seccion);
     const nombres = lista.filter(n=>n && n.trim())
+      .sort((a,b)=>a.trim().localeCompare(b.trim(), 'es', {sensitivity:'base'}))
       .map((n,i)=>`${i+1}. ${n}`).join('<br>') || `<span class="imp-vacio">Sin jugadores</span>`;
     return `<tr><td class="imp-seccion-col">Sección ${seccion}</td><td>${nombres}</td></tr>`;
   }).join('');
@@ -1634,6 +1631,7 @@ function generarTablaAtletismoImpresion(grado, genero, disciplina, seccionFiltro
   const filas = secciones.map(seccion=>{
     const lista = obtenerAtletismo(grado, genero, disciplina, seccion);
     const nombres = lista.filter(n=>n && n.trim())
+      .sort((a,b)=>a.trim().localeCompare(b.trim(), 'es', {sensitivity:'base'}))
       .map((n,i)=>`${i+1}. ${n}`).join('<br>') || `<span class="imp-vacio">Sin jugadores</span>`;
     return `<tr><td class="imp-seccion-col">Sección ${seccion}</td><td>${nombres}</td></tr>`;
   }).join('');
@@ -1714,17 +1712,19 @@ function generarAreaImpresion(filtro){
 
 function mostrarModalImprimir(){
   const gradoSelect = document.getElementById('impGradoSelect');
-  gradoSelect.innerHTML = `<option value="todos">Todos los grados</option>` +
-    GRADOS.map(g=>`<option value="${g}">${g}° de secundaria</option>`).join('');
+  gradoSelect.innerHTML = GRADOS.map(g=>`<option value="${g}">${g}° de secundaria</option>`).join('');
   gradoSelect.value = String(gradoActivo);
 
   const deporteSelect = document.getElementById('impDeporteSelect');
-  deporteSelect.innerHTML = `<option value="todos">Todos los deportes</option>` +
-    DEPORTES.map(d=>`<option value="${d.id}">${d.nombre}</option>`).join('');
+  deporteSelect.innerHTML = DEPORTES.map(d=>`<option value="${d.id}">${d.nombre}</option>`).join('');
   deporteSelect.value = deporteActivo;
 
   actualizarSeccionesImprimirSelect();
-  document.getElementById('impGeneroSelect').value = 'todos';
+
+  const generoSelect = document.getElementById('impGeneroSelect');
+  generoSelect.innerHTML = GENEROS.map(g=>`<option value="${g.id}">${g.nombre}</option>`).join('');
+  generoSelect.value = generoActivo;
+
   document.getElementById('overlayImprimir').classList.remove('oculto');
 }
 function cerrarModalImprimir(){
@@ -1733,9 +1733,11 @@ function cerrarModalImprimir(){
 function actualizarSeccionesImprimirSelect(){
   const gradoVal = document.getElementById('impGradoSelect').value;
   const seccionSelect = document.getElementById('impSeccionSelect');
-  const opciones = gradoVal==='todos' ? SECCIONES_TODAS : seccionesDeGrado(Number(gradoVal));
-  seccionSelect.innerHTML = `<option value="todas">Todas las secciones</option>` +
-    opciones.map(s=>`<option value="${s}">Sección ${s}</option>`).join('');
+  const opciones = seccionesDeGrado(Number(gradoVal));
+  const seccionPrevia = seccionSelect.value;
+  seccionSelect.innerHTML = opciones.map(s=>`<option value="${s}">Sección ${s}</option>`).join('');
+  seccionSelect.value = opciones.includes(seccionPrevia) ? seccionPrevia
+    : (opciones.includes(seccionInscripcionActiva) ? seccionInscripcionActiva : opciones[0]);
 }
 function ejecutarImpresion(){
   const filtro = {
@@ -1744,6 +1746,10 @@ function ejecutarImpresion(){
     deporteId: document.getElementById('impDeporteSelect').value,
     genero: document.getElementById('impGeneroSelect').value
   };
+  if(!filtro.grado || !filtro.seccion || !filtro.deporteId || !filtro.genero){
+    alert('Debes elegir grado, sección, disciplina y género para imprimir.');
+    return;
+  }
   cerrarModalImprimir();
   generarAreaImpresion(filtro);
   setTimeout(()=>window.print(), 60);
