@@ -262,8 +262,13 @@ pedir inicio de sesión.
   .imp-tabla th{ background:#eee; }
   .imp-seccion-col{ width:90px; font-weight:700; white-space:nowrap; }
   .imp-vacio{ color:#777; font-style:italic; }
-  .imp-llave{ display:flex; flex-wrap:wrap; gap:10px; margin-bottom:14px; }
-  .imp-ronda{ border:1px solid #999; border-radius:6px; padding:6px 10px; font-size:.85rem; min-width:180px; flex:1; }
+  .imp-ronda-titulo{ margin:10px 0 4px; font-size:.9rem; text-transform:uppercase; letter-spacing:.03em; color:#444; }
+  .imp-partido{ border:1px solid #999; border-radius:6px; margin-bottom:10px; overflow:hidden; page-break-inside:avoid; }
+  .imp-partido-titulo{ background:#eee; padding:5px 10px; font-weight:700; font-size:.9rem; border-bottom:1px solid #999; }
+  .imp-partido-equipos{ display:flex; }
+  .imp-equipo{ flex:1; padding:6px 10px; font-size:.85rem; }
+  .imp-equipo:first-child{ border-right:1px solid #999; }
+  .imp-bye{ font-size:.85rem; font-style:italic; margin:2px 0 8px; }
   .imp-campeon{ font-weight:700; margin:4px 0 14px; }
   @media print{
     body > *:not(#areaImpresion){ display:none !important; }
@@ -1597,10 +1602,15 @@ function alternarInscripcionSeccion(){
 }
 function cambiarSeccionInscripcion(s){ seccionInscripcionActiva = s; render(); }
 
-// ===================== Impresión: jugadores por sección/disciplina + llaves =====================
-function textoMatchImpresion(m){
-  const local = m.local ? `Sección ${m.local}` : 'Por definir';
-  const visitante = m.visitante ? `Sección ${m.visitante}` : 'Por definir';
+function nombresEquipoImpresion(deporteId, grado, genero, seccion){
+  if(!seccion) return `<span class="imp-vacio">Por definir</span>`;
+  const lista = obtenerJugadores(deporteId, grado, genero, seccion);
+  return lista.filter(n=>n && n.trim())
+    .sort((a,b)=>a.trim().localeCompare(b.trim(), 'es', {sensitivity:'base'}))
+    .map((n,i)=>`${i+1}. ${n}`).join('<br>') || `<span class="imp-vacio">Sin jugadores</span>`;
+}
+
+function resultadoMatchImpresion(m){
   let resultado = '';
   if(m.sets){
     const jugados = m.sets.filter(s=>s.l!==null && s.v!==null && s.l!=='' && s.v!=='');
@@ -1608,8 +1618,20 @@ function textoMatchImpresion(m){
   } else if(m.gLocal!==null && m.gLocal!==undefined && m.gLocal!=='' && m.gVisitante!==null && m.gVisitante!==undefined && m.gVisitante!==''){
     resultado = ` (${m.gLocal} - ${m.gVisitante})`;
   }
-  const ganadorTxt = m.ganador ? ` — Ganó Sección ${m.ganador}` : '';
-  return `${local} vs ${visitante}${resultado}${ganadorTxt}`;
+  return (m.ganador ? `${resultado} — Ganó Sección ${m.ganador}` : resultado);
+}
+
+// Partido con los jugadores de ambos equipos debajo del marcador
+function generarMatchImpresion(m, deporteId, grado, genero){
+  const localTxt = m.local ? `Sección ${m.local}` : 'Por definir';
+  const visitanteTxt = m.visitante ? `Sección ${m.visitante}` : 'Por definir';
+  return `<div class="imp-partido">
+    <div class="imp-partido-titulo">${localTxt} vs ${visitanteTxt}${resultadoMatchImpresion(m)}</div>
+    <div class="imp-partido-equipos">
+      <div class="imp-equipo"><strong>${localTxt}</strong><br>${nombresEquipoImpresion(deporteId, grado, genero, m.local)}</div>
+      <div class="imp-equipo"><strong>${visitanteTxt}</strong><br>${nombresEquipoImpresion(deporteId, grado, genero, m.visitante)}</div>
+    </div>
+  </div>`;
 }
 
 // seccionFiltro: null/undefined = todas las secciones del grado; si se pasa una letra, solo esa fila.
@@ -1617,10 +1639,7 @@ function generarTablaJugadoresImpresion(deporteId, grado, genero, seccionFiltro)
   const max = MAX_JUGADORES_POR_DEPORTE[deporteId];
   const secciones = seccionFiltro ? [seccionFiltro] : seccionesDeGrado(grado);
   const filas = secciones.map(seccion=>{
-    const lista = obtenerJugadores(deporteId, grado, genero, seccion);
-    const nombres = lista.filter(n=>n && n.trim())
-      .sort((a,b)=>a.trim().localeCompare(b.trim(), 'es', {sensitivity:'base'}))
-      .map((n,i)=>`${i+1}. ${n}`).join('<br>') || `<span class="imp-vacio">Sin jugadores</span>`;
+    const nombres = nombresEquipoImpresion(deporteId, grado, genero, seccion);
     return `<tr><td class="imp-seccion-col">Sección ${seccion}</td><td>${nombres}</td></tr>`;
   }).join('');
   return `<table class="imp-tabla"><thead><tr><th>Sección</th><th>Jugadores (máx. ${max})</th></tr></thead><tbody>${filas}</tbody></table>`;
@@ -1643,20 +1662,28 @@ function generarLlaveImpresion(deporteId, grado, genero){
   if(!t) return `<p class="imp-vacio">Llave aún no sorteada.</p>`;
   const sorteoInicialHecho = t.n===5 ? t.sorteo1Hecho : t.sorteoHecho;
   if(!sorteoInicialHecho) return `<p class="imp-vacio">Llave aún no sorteada.</p>`;
-  let html = `<div class="imp-llave">`;
+  let html = '';
   if(t.n===5){
-    html += `<div class="imp-ronda"><strong>Ronda 1</strong><br>${textoMatchImpresion(t.r1a)}<br>${textoMatchImpresion(t.r1b)}<br>Sección ${t.byeSeccion} pasa directo a semifinal</div>`;
+    html += `<h5 class="imp-ronda-titulo">Ronda 1</h5>`;
+    html += generarMatchImpresion(t.r1a, deporteId, grado, genero);
+    html += generarMatchImpresion(t.r1b, deporteId, grado, genero);
+    html += `<p class="imp-bye">Sección ${t.byeSeccion} pasa directo a semifinal</p>`;
     if(t.sorteo2Hecho){
-      html += `<div class="imp-ronda"><strong>Semifinal</strong><br>${textoMatchImpresion(t.semifinal)}<br>Sección ${t.directoFinal} pasó directo a la final</div>`;
-      html += `<div class="imp-ronda"><strong>Final</strong><br>${textoMatchImpresion(t.final)}</div>`;
+      html += `<h5 class="imp-ronda-titulo">Semifinal</h5>`;
+      html += generarMatchImpresion(t.semifinal, deporteId, grado, genero);
+      html += `<p class="imp-bye">Sección ${t.directoFinal} pasó directo a la final</p>`;
+      html += `<h5 class="imp-ronda-titulo">Final</h5>`;
+      html += generarMatchImpresion(t.final, deporteId, grado, genero);
     } else {
-      html += `<div class="imp-ronda"><strong>Semifinal</strong><br>Pendiente de sorteo</div>`;
+      html += `<h5 class="imp-ronda-titulo">Semifinal</h5><p class="imp-vacio">Pendiente de sorteo</p>`;
     }
   } else {
-    html += `<div class="imp-ronda"><strong>Semifinales</strong><br>${textoMatchImpresion(t.sf1)}<br>${textoMatchImpresion(t.sf2)}</div>`;
-    html += `<div class="imp-ronda"><strong>Final</strong><br>${textoMatchImpresion(t.final)}</div>`;
+    html += `<h5 class="imp-ronda-titulo">Semifinales</h5>`;
+    html += generarMatchImpresion(t.sf1, deporteId, grado, genero);
+    html += generarMatchImpresion(t.sf2, deporteId, grado, genero);
+    html += `<h5 class="imp-ronda-titulo">Final</h5>`;
+    html += generarMatchImpresion(t.final, deporteId, grado, genero);
   }
-  html += `</div>`;
   if(t.final.ganador) html += `<p class="imp-campeon">🏆 Campeón: Sección ${t.final.ganador}</p>`;
   return html;
 }
