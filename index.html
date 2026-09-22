@@ -346,20 +346,59 @@ pedir inicio de sesión.
 </div>
 
 <div class="overlay-login oculto" id="overlayImprimir">
-  <div class="caja-login">
+  <div class="caja-login" style="max-width:420px; width:96vw;">
     <h3>🖨️ Imprimir</h3>
-    <p>Elige qué quieres imprimir: jugadores de una sección, una llave completa, o todo.</p>
-    <label style="font-size:.8rem; font-weight:700; display:block; margin:8px 0 2px;">Grado</label>
-    <select id="impGradoSelect" onchange="actualizarSeccionesImprimirSelect()" style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--borde); margin-bottom:8px;"></select>
-    <label style="font-size:.8rem; font-weight:700; display:block; margin:8px 0 2px;">Sección</label>
-    <select id="impSeccionSelect" style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--borde); margin-bottom:8px;"></select>
-    <label style="font-size:.8rem; font-weight:700; display:block; margin:8px 0 2px;">Deporte / disciplina</label>
-    <select id="impDeporteSelect" style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--borde); margin-bottom:8px;"></select>
-    <label style="font-size:.8rem; font-weight:700; display:block; margin:8px 0 2px;">Género</label>
-    <select id="impGeneroSelect" style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--borde); margin-bottom:8px;"></select>
+
+    <!-- Selector de modo -->
+    <div style="display:flex; gap:8px; margin-bottom:12px;">
+      <button id="impModoBtnJugadores" class="btn" style="flex:1; font-size:.82rem;" onclick="cambiarModoImpresion('jugadores')">👥 Jugadores</button>
+      <button id="impModoBtnPartido" class="btn secundario" style="flex:1; font-size:.82rem;" onclick="cambiarModoImpresion('partido')">⚔️ Partido + Jugadores</button>
+    </div>
+
+    <!-- Campos comunes -->
+    <label style="font-size:.8rem; font-weight:700; display:block; margin:6px 0 2px;">Grado</label>
+    <select id="impGradoSelect" onchange="actualizarImprimirSelects()" style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--borde); margin-bottom:8px;"></select>
+
+    <label style="font-size:.8rem; font-weight:700; display:block; margin:6px 0 2px;">Deporte</label>
+    <select id="impDeporteSelect" onchange="actualizarImprimirSelects()" style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--borde); margin-bottom:8px;"></select>
+
+    <label style="font-size:.8rem; font-weight:700; display:block; margin:6px 0 2px;">Género</label>
+    <select id="impGeneroSelect" onchange="actualizarImprimirSelects()" style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--borde); margin-bottom:8px;"></select>
+
+    <!-- Solo modo jugadores -->
+    <div id="impPanelJugadores">
+      <label style="font-size:.8rem; font-weight:700; display:block; margin:6px 0 2px;">Sección</label>
+      <select id="impSeccionSelect" style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--borde); margin-bottom:8px;"></select>
+      <!-- Solo atletismo -->
+      <div id="impPanelDisciplina" style="display:none;">
+        <label style="font-size:.8rem; font-weight:700; display:block; margin:6px 0 2px;">Disciplina</label>
+        <select id="impDisciplinaSelect" style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--borde); margin-bottom:8px;"></select>
+      </div>
+    </div>
+
+    <!-- Solo modo partido -->
+    <div id="impPanelPartido" style="display:none;">
+      <label style="font-size:.8rem; font-weight:700; display:block; margin:6px 0 2px;">Ronda</label>
+      <select id="impRondaSelect" onchange="actualizarPartidosSelect()" style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--borde); margin-bottom:8px;"></select>
+      <label style="font-size:.8rem; font-weight:700; display:block; margin:6px 0 2px;">Partido</label>
+      <select id="impPartidoSelect" style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--borde); margin-bottom:8px;"></select>
+    </div>
+
     <div class="fila-botones">
       <button class="btn secundario" onclick="cerrarModalImprimir()">Cancelar</button>
       <button class="btn" onclick="ejecutarImpresion()">Imprimir</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay-login oculto" id="overlayEditarLlave">
+  <div class="caja-login" style="max-width:420px; width:96vw;">
+    <h3>✏️ Editar llave manualmente</h3>
+    <p style="font-size:.82rem; color:#666; margin:0 0 10px;">Cambia qué sección ocupa cada posición. Las secciones descalificadas o retiradas puedes quitarlas o reemplazarlas.</p>
+    <div id="editarLlaveContenido"></div>
+    <div class="fila-botones" style="margin-top:12px;">
+      <button class="btn secundario" onclick="cerrarEditarLlave()">Cancelar</button>
+      <button class="btn" onclick="guardarEdicionLlave()">Guardar</button>
     </div>
   </div>
 </div>
@@ -873,6 +912,97 @@ function actualizarSet(deporteId, grado, genero, matchKey, idxSet, campo, valor)
   guardarEstado(); render();
 }
 
+let _editLlaveCtx = null; // {deporteId, grado, genero}
+
+function abrirEditarLlave(deporteId, grado, genero){
+  _editLlaveCtx = {deporteId, grado, genero};
+  const t = estado.torneos[claveTorneo(deporteId, grado, genero)];
+  const secciones = seccionesDeGrado(grado);
+
+  function select(id, valorActual, label){
+    const ops = [`<option value="">— Sin sección —</option>`]
+      .concat(secciones.map(s=>`<option value="${s}" ${s===valorActual?'selected':''}>${s}</option>`))
+      .join('');
+    return `<div style="margin-bottom:8px;">
+      <label style="font-size:.78rem;font-weight:700;display:block;margin-bottom:2px;">${label}</label>
+      <select id="${id}" style="width:100%;padding:7px;border-radius:8px;border:1px solid var(--borde);">${ops}</select>
+    </div>`;
+  }
+
+  let html = '';
+  if(t.n===5){
+    html += `<p style="font-size:.8rem;font-weight:700;margin:8px 0 4px;text-transform:uppercase;color:#555;">Ronda 1</p>`;
+    html += select('el_r1a_local',   t.r1a.local,      'Partido A — Local');
+    html += select('el_r1a_visit',   t.r1a.visitante,  'Partido A — Visitante');
+    html += select('el_r1b_local',   t.r1b.local,      'Partido B — Local');
+    html += select('el_r1b_visit',   t.r1b.visitante,  'Partido B — Visitante');
+    html += select('el_bye',         t.byeSeccion,     'Pasa directo (bye)');
+    if(t.sorteo2Hecho){
+      html += `<p style="font-size:.8rem;font-weight:700;margin:10px 0 4px;text-transform:uppercase;color:#555;">Semifinal</p>`;
+      html += select('el_sf_local',  t.semifinal.local,     'Semifinal — Local');
+      html += select('el_sf_visit',  t.semifinal.visitante, 'Semifinal — Visitante');
+      html += select('el_directo',   t.directoFinal,        'Pasa directo a la final');
+    }
+  } else {
+    html += `<p style="font-size:.8rem;font-weight:700;margin:8px 0 4px;text-transform:uppercase;color:#555;">Semifinales</p>`;
+    html += select('el_sf1_local',  t.sf1.local,      'Semifinal 1 — Local');
+    html += select('el_sf1_visit',  t.sf1.visitante,  'Semifinal 1 — Visitante');
+    html += select('el_sf2_local',  t.sf2.local,      'Semifinal 2 — Local');
+    html += select('el_sf2_visit',  t.sf2.visitante,  'Semifinal 2 — Visitante');
+  }
+  if(t.final && (t.final.local || t.final.visitante)){
+    html += `<p style="font-size:.8rem;font-weight:700;margin:10px 0 4px;text-transform:uppercase;color:#555;">Final</p>`;
+    html += select('el_fin_local',  t.final.local,     'Final — Local');
+    html += select('el_fin_visit',  t.final.visitante, 'Final — Visitante');
+  }
+
+  document.getElementById('editarLlaveContenido').innerHTML = html;
+  document.getElementById('overlayEditarLlave').classList.remove('oculto');
+}
+
+function cerrarEditarLlave(){
+  document.getElementById('overlayEditarLlave').classList.add('oculto');
+  _editLlaveCtx = null;
+}
+
+function _val(id){ const el = document.getElementById(id); return el ? (el.value || null) : undefined; }
+
+function guardarEdicionLlave(){
+  const {deporteId, grado, genero} = _editLlaveCtx;
+  const t = estado.torneos[claveTorneo(deporteId, grado, genero)];
+  if(t.n===5){
+    t.r1a.local      = _val('el_r1a_local');
+    t.r1a.visitante  = _val('el_r1a_visit');
+    t.r1b.local      = _val('el_r1b_local');
+    t.r1b.visitante  = _val('el_r1b_visit');
+    t.byeSeccion     = _val('el_bye');
+    // Limpiar ganador de ronda 1 si se cambió algún equipo
+    if(t.r1a.ganador && t.r1a.ganador!==t.r1a.local && t.r1a.ganador!==t.r1a.visitante) t.r1a.ganador=null;
+    if(t.r1b.ganador && t.r1b.ganador!==t.r1b.local && t.r1b.ganador!==t.r1b.visitante) t.r1b.ganador=null;
+    if(t.sorteo2Hecho){
+      const sfL = _val('el_sf_local'), sfV = _val('el_sf_visit'), dir = _val('el_directo');
+      if(sfL!==undefined){ t.semifinal.local = sfL; }
+      if(sfV!==undefined){ t.semifinal.visitante = sfV; }
+      if(dir!==undefined){ t.directoFinal = dir; t.final.visitante = dir; }
+      if(t.semifinal.ganador && t.semifinal.ganador!==t.semifinal.local && t.semifinal.ganador!==t.semifinal.visitante) t.semifinal.ganador=null;
+    }
+  } else {
+    t.sf1.local     = _val('el_sf1_local');
+    t.sf1.visitante = _val('el_sf1_visit');
+    t.sf2.local     = _val('el_sf2_local');
+    t.sf2.visitante = _val('el_sf2_visit');
+    if(t.sf1.ganador && t.sf1.ganador!==t.sf1.local && t.sf1.ganador!==t.sf1.visitante) t.sf1.ganador=null;
+    if(t.sf2.ganador && t.sf2.ganador!==t.sf2.local && t.sf2.ganador!==t.sf2.visitante) t.sf2.ganador=null;
+  }
+  if(_val('el_fin_local')!==undefined)  t.final.local     = _val('el_fin_local');
+  if(_val('el_fin_visit')!==undefined)  t.final.visitante = _val('el_fin_visit');
+  if(t.final.ganador && t.final.ganador!==t.final.local && t.final.ganador!==t.final.visitante) t.final.ganador=null;
+
+  guardarEstado();
+  cerrarEditarLlave();
+  render();
+}
+
 function reiniciarTorneo(deporteId, grado, genero){
   if(!confirm('¿Reiniciar el sorteo y los resultados de este grado, deporte y categoría?')) return;
   estado.torneos[claveTorneo(deporteId,grado,genero)] = torneoVacio(NUM_SECCIONES_POR_GRADO[grado], deporteId);
@@ -1317,7 +1447,7 @@ function renderTorneo(){
   const campeonListo = t.final.ganador;
   cont.innerHTML = `
     <div class="panel" style="--sport-color:${deporte.color}">
-      ${modoProyeccion ? '' : `<div class="toolbar"><button class="btn secundario" onclick="reiniciarTorneo('${deporteActivo}',${gradoActivo},'${generoActivo}')">Rehacer sorteo</button></div>`}
+      ${modoProyeccion ? '' : `<div class="toolbar"><button class="btn secundario" onclick="reiniciarTorneo('${deporteActivo}',${gradoActivo},'${generoActivo}')">Rehacer sorteo</button><button class="btn secundario" onclick="abrirEditarLlave('${deporteActivo}',${gradoActivo},'${generoActivo}')">✏️ Editar llave</button></div>`}
       <h2>${deporte.nombre} ${nombreGenero} — ${gradoActivo}° de secundaria <span class="cancha-tag">${deporte.cancha}</span></h2>
       <div class="sub">${modoProyeccion ? 'Resultados en vivo' : (esVoley(deporteActivo) ? 'Ingresa el marcador de cada set (mejor de 3)' : 'Ingresa el marcador de cada partido') + ' para que la sección ganadora avance'}</div>
       <div class="bracket">${bracketHtml}</div>
@@ -1688,53 +1818,56 @@ function generarLlaveImpresion(deporteId, grado, genero){
   return html;
 }
 
-// filtro = { grado:'todos'|numero, seccion:'todas'|letra, deporteId:'todos'|id, genero:'todos'|'F'|'M' }
-function generarAreaImpresion(filtro){
-  const grados = filtro.grado==='todos' ? GRADOS : [Number(filtro.grado)];
-  const deportes = filtro.deporteId==='todos' ? DEPORTES : DEPORTES.filter(d=>d.id===filtro.deporteId);
-  const generos = filtro.genero==='todos' ? GENEROS : GENEROS.filter(g=>g.id===filtro.genero);
-  const seccionFiltro = (filtro.seccion && filtro.seccion!=='todas') ? filtro.seccion : null;
+// filtro = { grado, seccion, deporteId, genero, disciplina }
+function generarAreaImpresionJugadores(f){
+  const deporte = DEPORTES.find(d=>d.id===f.deporteId);
+  const genNombre = GENEROS.find(g=>g.id===f.genero)?.nombre || f.genero;
+  let titulo = `${deporte.nombre} — ${genNombre} — ${f.grado}° Sección ${f.seccion}`;
+  let cuerpo = '';
+  if(deporte.tipo==='atletismo'){
+    const disc = DISCIPLINAS_ATLETISMO.find(d=>d.id===f.disciplina);
+    titulo += ` — ${disc ? disc.nombre : ''}`;
+    cuerpo = generarTablaAtletismoImpresion(f.grado, f.genero, f.disciplina, f.seccion);
+  } else {
+    cuerpo = generarTablaJugadoresImpresion(f.deporteId, f.grado, f.genero, f.seccion);
+  }
+  document.getElementById('areaImpresion').innerHTML = `
+    <div class="imp-portada">
+      <h1>🏆 Olimpiadas Escolares 2026</h1>
+      <p>I.E. N° 0148 "Maestro Víctor Raúl Haya de la Torre"</p>
+      <p>${titulo}</p>
+      <p style="color:#777; font-size:.8rem;">${new Date().toLocaleDateString('es-PE')}</p>
+    </div>
+    ${cuerpo}`;
+}
 
-  let subtitulo = 'Lista de jugadores';
-  if(deportes.length===1) subtitulo += ` — ${deportes[0].nombre}`;
-  if(seccionFiltro) subtitulo += ` — Sección ${seccionFiltro}`;
-  if(grados.length===1) subtitulo += ` — ${grados[0]}° de secundaria`;
-
-  let html = `<div class="imp-portada">
-    <h1>🏆 Olimpiadas Escolares 2026</h1>
-    <p>I.E. N° 0148 "Maestro Víctor Raúl Haya de la Torre"</p>
-    <p>${subtitulo}</p>
-    <p style="color:#777; font-size:.8rem;">Generado el ${new Date().toLocaleDateString('es-PE')}</p>
-  </div>`;
-
-  grados.forEach((g,idxG)=>{
-    // Si hay una sección específica seleccionada, filtramos las secciones que no existan en ese grado.
-    if(seccionFiltro && !seccionesDeGrado(g).includes(seccionFiltro)) return;
-    html += `<div class="imp-grado${idxG>0 ? ' salto-pagina' : ''}"><h2>${g}° de secundaria${seccionFiltro ? ' — Sección '+seccionFiltro : ''}</h2>`;
-    deportes.forEach(d=>{
-      html += `<h3 class="imp-deporte">${d.nombre}</h3>`;
-      if(d.tipo==='llave'){
-        generos.forEach(gen=>{
-          html += `<h4>${gen.nombre}</h4>`;
-          html += generarTablaJugadoresImpresion(d.id, g, gen.id, seccionFiltro);
-          html += generarLlaveImpresion(d.id, g, gen.id);
-        });
-      } else {
-        generos.forEach(gen=>{
-          html += `<h4>${gen.nombre}</h4>`;
-          DISCIPLINAS_ATLETISMO.forEach(dis=>{
-            html += `<p class="imp-disciplina"><strong>${dis.nombre}</strong></p>`;
-            html += generarTablaAtletismoImpresion(g, gen.id, dis.id, seccionFiltro);
-            const ganador = obtenerGanadorAtletismo(g, gen.id, dis.id);
-            if(ganador) html += `<p class="imp-campeon">🏅 Ganador: Sección ${ganador}</p>`;
-          });
-        });
-      }
-    });
-    html += `</div>`;
-  });
-
-  document.getElementById('areaImpresion').innerHTML = html;
+// filtro = { grado, deporteId, genero, ronda, partido }
+function generarAreaImpresionPartido(f){
+  const t = estado.torneos[claveTorneo(f.deporteId, f.grado, f.genero)];
+  const deporte = DEPORTES.find(d=>d.id===f.deporteId);
+  const genNombre = GENEROS.find(g=>g.id===f.genero)?.nombre || f.genero;
+  const rondasLabel = {r1:'Ronda 1', sf:'Semifinal', final:'Final'};
+  const rondaLabel = rondasLabel[f.ronda] || f.ronda;
+  let m;
+  if(f.partido==='r1a') m = t.r1a;
+  else if(f.partido==='r1b') m = t.r1b;
+  else if(f.partido==='semifinal') m = t.semifinal;
+  else if(f.partido==='sf1') m = t.sf1;
+  else if(f.partido==='sf2') m = t.sf2;
+  else if(f.partido==='final') m = t.final;
+  if(!m){ document.getElementById('areaImpresion').innerHTML = '<p>Partido no encontrado.</p>'; return; }
+  const locTxt = m.local ? `Sección ${m.local}` : '—';
+  const visTxt = m.visitante ? `Sección ${m.visitante}` : '—';
+  const titulo = `${deporte.nombre} — ${genNombre} — ${f.grado}° — ${rondaLabel}`;
+  document.getElementById('areaImpresion').innerHTML = `
+    <div class="imp-portada">
+      <h1>🏆 Olimpiadas Escolares 2026</h1>
+      <p>I.E. N° 0148 "Maestro Víctor Raúl Haya de la Torre"</p>
+      <p>${titulo}</p>
+      <p style="color:#777; font-size:.8rem;">${new Date().toLocaleDateString('es-PE')}</p>
+    </div>
+    ${generarMatchImpresion(m, f.deporteId, f.grado, f.genero)}
+    ${m.ganador ? `<p class="imp-campeon">🏆 Ganó: Sección ${m.ganador}</p>` : ''}`;
 }
 
 function mostrarModalImprimir(){
@@ -1746,39 +1879,148 @@ function mostrarModalImprimir(){
   deporteSelect.innerHTML = DEPORTES.map(d=>`<option value="${d.id}">${d.nombre}</option>`).join('');
   deporteSelect.value = deporteActivo;
 
-  actualizarSeccionesImprimirSelect();
-
   const generoSelect = document.getElementById('impGeneroSelect');
   generoSelect.innerHTML = GENEROS.map(g=>`<option value="${g.id}">${g.nombre}</option>`).join('');
   generoSelect.value = generoActivo;
 
+  impModo = 'jugadores';
+  actualizarImprimirSelects();
   document.getElementById('overlayImprimir').classList.remove('oculto');
 }
+
+let impModo = 'jugadores';
+
+function cambiarModoImpresion(modo){
+  impModo = modo;
+  document.getElementById('impModoBtnJugadores').className = modo==='jugadores' ? 'btn' : 'btn secundario';
+  document.getElementById('impModoBtnPartido').className  = modo==='partido'   ? 'btn' : 'btn secundario';
+  document.getElementById('impPanelJugadores').style.display = modo==='jugadores' ? '' : 'none';
+  document.getElementById('impPanelPartido').style.display   = modo==='partido'   ? '' : 'none';
+  actualizarImprimirSelects();
+}
+
+function actualizarImprimirSelects(){
+  const grado     = Number(document.getElementById('impGradoSelect').value);
+  const deporteId = document.getElementById('impDeporteSelect').value;
+  const genero    = document.getElementById('impGeneroSelect').value;
+  const deporte   = DEPORTES.find(d=>d.id===deporteId);
+
+  if(impModo==='jugadores'){
+    document.getElementById('impPanelJugadores').style.display = '';
+    document.getElementById('impPanelPartido').style.display   = 'none';
+    // Secciones
+    const secciones = seccionesDeGrado(grado);
+    const secSelect = document.getElementById('impSeccionSelect');
+    const prev = secSelect.value;
+    secSelect.innerHTML = secciones.map(s=>`<option value="${s}">Sección ${s}</option>`).join('');
+    secSelect.value = secciones.includes(prev) ? prev : secciones[0];
+    // Panel disciplina (solo atletismo)
+    const panelDisc = document.getElementById('impPanelDisciplina');
+    if(deporte && deporte.tipo==='atletismo'){
+      panelDisc.style.display = '';
+      document.getElementById('impDisciplinaSelect').innerHTML =
+        DISCIPLINAS_ATLETISMO.map(d=>`<option value="${d.id}">${d.nombre}</option>`).join('');
+    } else {
+      panelDisc.style.display = 'none';
+    }
+  } else {
+    // Modo partido: solo deportes de llave
+    document.getElementById('impPanelJugadores').style.display = 'none';
+    document.getElementById('impPanelPartido').style.display   = '';
+    // Filtrar deportes a llave
+    const depSel = document.getElementById('impDeporteSelect');
+    const depActual = depSel.value;
+    depSel.innerHTML = DEPORTES.filter(d=>d.tipo==='llave').map(d=>`<option value="${d.id}">${d.nombre}</option>`).join('');
+    if([...depSel.options].some(o=>o.value===depActual)) depSel.value = depActual;
+    actualizarRondasSelect();
+  }
+}
+
+function actualizarRondasSelect(){
+  const grado     = Number(document.getElementById('impGradoSelect').value);
+  const deporteId = document.getElementById('impDeporteSelect').value;
+  const genero    = document.getElementById('impGeneroSelect').value;
+  const t = estado.torneos[claveTorneo(deporteId, grado, genero)];
+  const rondaSelect = document.getElementById('impRondaSelect');
+
+  if(!t){ rondaSelect.innerHTML = '<option value="">Sin llave sorteada</option>'; actualizarPartidosSelect(); return; }
+  const sorteoInicialHecho = t.n===5 ? t.sorteo1Hecho : t.sorteoHecho;
+  if(!sorteoInicialHecho){ rondaSelect.innerHTML = '<option value="">Llave no sorteada aún</option>'; actualizarPartidosSelect(); return; }
+
+  const rondas = [];
+  if(t.n===5){
+    if(t.sorteo1Hecho) rondas.push({id:'r1', label:'Ronda 1'});
+    if(t.sorteo2Hecho) rondas.push({id:'sf', label:'Semifinal'});
+    if(t.final) rondas.push({id:'final', label:'Final'});
+  } else {
+    if(t.sorteoHecho) rondas.push({id:'sf', label:'Semifinales'});
+    if(t.final) rondas.push({id:'final', label:'Final'});
+  }
+  const prevRonda = rondaSelect.value;
+  rondaSelect.innerHTML = rondas.map(r=>`<option value="${r.id}">${r.label}</option>`).join('');
+  if(rondas.some(r=>r.id===prevRonda)) rondaSelect.value = prevRonda;
+  actualizarPartidosSelect();
+}
+
+function actualizarPartidosSelect(){
+  const grado     = Number(document.getElementById('impGradoSelect').value);
+  const deporteId = document.getElementById('impDeporteSelect').value;
+  const genero    = document.getElementById('impGeneroSelect').value;
+  const ronda     = document.getElementById('impRondaSelect').value;
+  const t = estado.torneos[claveTorneo(deporteId, grado, genero)];
+  const partidoSelect = document.getElementById('impPartidoSelect');
+
+  if(!t || !ronda){ partidoSelect.innerHTML = '<option value="">—</option>'; return; }
+
+  const partidos = [];
+  function addMatch(m, id){
+    const loc = m.local ? `Sección ${m.local}` : '?';
+    const vis = m.visitante ? `Sección ${m.visitante}` : '?';
+    partidos.push({id, label:`${loc} vs ${vis}`});
+  }
+  if(ronda==='r1' && t.n===5){
+    addMatch(t.r1a, 'r1a');
+    addMatch(t.r1b, 'r1b');
+  } else if(ronda==='sf'){
+    if(t.n===5){ addMatch(t.semifinal, 'semifinal'); }
+    else { addMatch(t.sf1,'sf1'); addMatch(t.sf2,'sf2'); }
+  } else if(ronda==='final'){
+    addMatch(t.final, 'final');
+  }
+  const prevP = partidoSelect.value;
+  partidoSelect.innerHTML = partidos.map(p=>`<option value="${p.id}">${p.label}</option>`).join('');
+  if(partidos.some(p=>p.id===prevP)) partidoSelect.value = prevP;
+}
+
 function cerrarModalImprimir(){
+  // Restaurar opciones de deporte para modo jugadores
+  const depSel = document.getElementById('impDeporteSelect');
+  if(depSel.options.length < DEPORTES.length){
+    depSel.innerHTML = DEPORTES.map(d=>`<option value="${d.id}">${d.nombre}</option>`).join('');
+  }
   document.getElementById('overlayImprimir').classList.add('oculto');
 }
-function actualizarSeccionesImprimirSelect(){
-  const gradoVal = document.getElementById('impGradoSelect').value;
-  const seccionSelect = document.getElementById('impSeccionSelect');
-  const opciones = seccionesDeGrado(Number(gradoVal));
-  const seccionPrevia = seccionSelect.value;
-  seccionSelect.innerHTML = opciones.map(s=>`<option value="${s}">Sección ${s}</option>`).join('');
-  seccionSelect.value = opciones.includes(seccionPrevia) ? seccionPrevia
-    : (opciones.includes(seccionInscripcionActiva) ? seccionInscripcionActiva : opciones[0]);
-}
+
 function ejecutarImpresion(){
-  const filtro = {
-    grado: document.getElementById('impGradoSelect').value,
-    seccion: document.getElementById('impSeccionSelect').value,
-    deporteId: document.getElementById('impDeporteSelect').value,
-    genero: document.getElementById('impGeneroSelect').value
-  };
-  if(!filtro.grado || !filtro.seccion || !filtro.deporteId || !filtro.genero){
-    alert('Debes elegir grado, sección, disciplina y género para imprimir.');
-    return;
+  const grado     = Number(document.getElementById('impGradoSelect').value);
+  const deporteId = document.getElementById('impDeporteSelect').value;
+  const genero    = document.getElementById('impGeneroSelect').value;
+
+  if(impModo==='jugadores'){
+    const seccion     = document.getElementById('impSeccionSelect').value;
+    const deporte     = DEPORTES.find(d=>d.id===deporteId);
+    const disciplina  = deporte && deporte.tipo==='atletismo'
+      ? document.getElementById('impDisciplinaSelect').value : null;
+    if(!grado || !seccion || !deporteId || !genero){ alert('Completa todos los campos.'); return; }
+    cerrarModalImprimir();
+    generarAreaImpresionJugadores({grado, seccion, deporteId, genero, disciplina});
+  } else {
+    const ronda   = document.getElementById('impRondaSelect').value;
+    const partido = document.getElementById('impPartidoSelect').value;
+    if(!grado || !deporteId || !genero || !ronda || !partido){ alert('Completa todos los campos.'); return; }
+    cerrarModalImprimir();
+    generarAreaImpresionPartido({grado, deporteId, genero, ronda, partido});
   }
-  cerrarModalImprimir();
-  generarAreaImpresion(filtro);
   setTimeout(()=>window.print(), 60);
 }
 
